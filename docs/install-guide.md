@@ -176,3 +176,40 @@ snapshot).
 - The API connects with a least-privilege database role that cannot modify or delete audit records; a trigger
   blocks it for every role, and a hash chain detects tampering by anyone with superuser access.
 - Membership of the `docker` group is equivalent to root on this server; keep it to administrators.
+
+## 13. Verify the installation
+
+Run these on the server after `opsbrainctl install core`. Replace `opsbrain.corp.example` with your hostname.
+Each step says what you should see.
+
+| # | Check | Command / action | Expected |
+|---|---|---|---|
+| 1 | Services and checks | `sudo opsbrainctl status` | Every service `ok`; certificate `ok`; backup shows a warning until step 11 |
+| 2 | API through TLS | `curl --cacert /etc/opsbrain/ca/ca.crt https://opsbrain.corp.example/api/health/ready` | `{"status":"ok"}` |
+| 3 | Security headers | `curl -sI --cacert /etc/opsbrain/ca/ca.crt https://opsbrain.corp.example/ \| grep -iE 'strict-transport\|content-security\|x-frame'` | three headers listed |
+| 4 | Internal metrics hidden | `curl -s -o /dev/null -w '%{http_code}\n' --cacert /etc/opsbrain/ca/ca.crt https://opsbrain.corp.example/api/metrics` | `404` |
+| 5 | HTTP → HTTPS | `curl -sI http://opsbrain.corp.example/ \| head -1` | `308 Permanent Redirect` |
+| 6 | Old TLS refused | `curl --tls-max 1.1 --cacert /etc/opsbrain/ca/ca.crt https://opsbrain.corp.example/` | fails (handshake error) |
+| 7 | First sign-in | Browser → `https://opsbrain.corp.example`, sign in as the admin | asked to set up two-factor; after scanning the QR and entering the code, the Overview opens |
+| 8 | Platform health | Overview → Platform health | API, database, Valkey `ok`; worker `ok` within a minute; audit integrity `ok` within an hour (or after step 10); TLS `ok` |
+| 9 | Roles | Administration → Users → Add user (role Viewer). Sign in as that user in a private window | must change the temporary password; no Administration menu; `/admin/users` shows "No access" |
+| 10 | Lockout and audit | In the private window enter a wrong password 5 times, then the right one | still refused; admin sees "locked" in Users and can Unlock. Audit Logs shows the failures; **Verify integrity** says "Hash chain intact" |
+| 11 | Backup | `sudo opsbrainctl backup` then `sudo opsbrainctl backup --list` | snapshot listed; `status` and Platform health show backup `ok` |
+| 12 | Restore drill (before go-live) | Add a throw-away user, then `sudo opsbrainctl restore <snapshot from step 11>` and type `restore` | the throw-away user is gone; a `pre-restore` snapshot exists |
+| 13 | Remove keeps data | `sudo opsbrainctl remove core`, then `sudo opsbrainctl install core` | you can sign in with the same accounts |
+| 14 | Schedules | `systemctl list-timers 'opsbrain-*'` | backup and cert-renew timers listed |
+| 15 | Backup password | Copy `RESTIC_PASSWORD` from `/etc/opsbrain/secrets/backup.env` to your password manager | stored off the server |
+
+If a check fails, collect the output of these and see [troubleshooting](troubleshooting.md):
+
+```bash
+sudo opsbrainctl status
+```
+
+```bash
+sudo opsbrainctl logs api
+```
+
+```bash
+sudo opsbrainctl logs web
+```

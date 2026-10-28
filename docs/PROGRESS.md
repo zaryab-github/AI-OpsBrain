@@ -2,12 +2,11 @@
 
 ## Status
 - Phase 0 (requirements, stack, plan): done, approved 2026-10-28.
-- **Phase 1 (foundation & core): code complete, NOT yet committed.** Blocked on Docker Desktop being installed on the
-  dev PC to run the integration tests (22) and the end-to-end lifecycle test. Next steps for whoever continues:
-  1. `scripts/dev/test-services.sh up` then `cd backend && .venv/Scripts/python -m pytest` — fix failures.
-  2. `bash tests/e2e/in-docker.sh` — full install/backup/restore/upgrade/remove/purge on a disposable Ubuntu host.
-  3. Commit with executable bits: `git add --chmod=+x scripts/opsbrainctl scripts/dev/*.sh tests/e2e/*.sh tests/scripts/*.sh deploy/core/postgres/init/*.sh`.
-  4. Stop and ask the owner to approve Phase 2.
+- **Phase 1 (foundation & core): committed; awaiting the owner's deployment on the target server.** By owner
+  decision (2026-10-28) the end-to-end lifecycle test was not run locally; the owner verifies on the real server
+  using the checklist in `docs/install-guide.md` §13. Next: fix anything that deployment reveals, then ask the owner
+  to approve Phase 2.
+- Commit rule: keep executable bits on scripts (`git add --chmod=+x scripts/opsbrainctl scripts/dev/*.sh tests/e2e/*.sh tests/scripts/*.sh deploy/core/postgres/init/*.sh`).
 
 ## Owner decisions (2026-10-28)
 | Topic | Decision |
@@ -54,7 +53,7 @@
 ## Phase log
 _(each phase appends: what was built, how it was tested, commit hash, known gaps)_
 
-### Phase 1 — Foundation & core (2026-10-28, in progress)
+### Phase 1 — Foundation & core (2026-10-28, committed; deployment verification pending)
 
 **Built**
 - Backend (`backend/`): FastAPI app, SQLAlchemy models, Alembic migration `0001_core`, Celery worker (heartbeat,
@@ -80,14 +79,18 @@ _(each phase appends: what was built, how it was tested, commit hash, known gaps
   safety backup and typed confirmation, purge with typed confirmation and final backup, systemd timers.
 - Docs: README, install guide, user guide, troubleshooting guide. CI workflow (`.github/workflows/ci.yml`).
 
-**Tested so far (on the Windows dev PC, no Docker)**
-- Backend unit tests: 23 passed. Ruff: clean.
+**Tested (Windows dev PC with Docker Desktop 29.9)**
+- Backend: 57 passed — 35 unit + 22 integration against real PostgreSQL 16 (pgvector) and Valkey 8.1. Ruff clean.
+  Integration testing found and fixed: pydantic `EmailStr` rejected internal mail domains (`.local`, `.test`) →
+  replaced with a syntax validator; CLI now validates username/email too.
+- Images build: `opsbrain/api` 252 MB, `opsbrain/web` 51 MB; all images run as non-root (api/web uid 10001,
+  postgres 999, valkey 999). Caddyfile parses (`caddy validate`).
 - Frontend: `tsc` clean, Vitest 8 passed, production build OK.
 - Shell: shellcheck clean; `tests/scripts/test_opsbrainctl.sh` 28 passed (module state, confirmations, secrets,
   CA + server certificate SANs/chain/validity, cert import mismatch).
 
-**Not yet run (needs Docker)**: backend integration tests (22, real Postgres + Valkey), container image builds,
-`tests/e2e/run.sh` lifecycle test.
+**Not run**: `tests/e2e/run.sh` (opsbrainctl install/backup/restore/upgrade/remove/purge on a real host) — skipped by
+owner decision; the target-server deployment is the first run of the installer. CI runs it on every push.
 
 **Known gaps / decisions**
 - Docker image tags pinned to versions known at build time (pgvector 0.8.0-pg16, valkey 8.1, caddy 2.10.0,
