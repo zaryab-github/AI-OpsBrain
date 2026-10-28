@@ -1,0 +1,127 @@
+# Core module: edge (TLS + UI), API, worker, PostgreSQL and Valkey.
+# Managed by opsbrainctl — run `opsbrainctl status core` rather than calling docker compose directly.
+# Variables come from ${OPSBRAIN_ETC}/compose.env (non-secret) and ${OPSBRAIN_ETC}/secrets/*.env (mode 0600).
+name: opsbrain-core
+
+x-defaults: &defaults
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+  networks: [opsbrain]
+
+x-app: &app
+  <<: *defaults
+  image: opsbrain/api:${OPSBRAIN_VERSION:?}
+  build: { context: ../../backend }
+  user: "10001:10001"
+  read_only: true
+  tmpfs: ["/tmp:size=64m"]
+  env_file: ["${OPSBRAIN_ETC:?}/secrets/app.env"]
+  environment:
+    OPSBRAIN_PUBLIC_URL: "https://${OPSBRAIN_HOSTNAME:?}"
+    OPSBRAIN_MODULES_FILE: /etc/opsbrain/state/modules.json
+    OPSBRAIN_BACKUP_STATUS_FILE: /var/lib/opsbrain/backup-status/status.json
+    OPSBRAIN_TLS_CERT_FILE: /etc/opsbrain/tls/server.crt
+  volumes:
+    - "${OPSBRAIN_ETC}/state:/etc/opsbrain/state:ro"
+    - "${OPSBRAIN_ETC}/tls/server.crt:/etc/opsbrain/tls/server.crt:ro"
+    - "${OPSBRAIN_VAR:?}/backup-status:/var/lib/opsbrain/backup-status:ro"
+
+services:
+  postgres:
+    <<: *defaults
+    image: pgvector/pgvector:0.8.0-pg16
+    user: postgres
+    env_file: ["${OPSBRAIN_ETC}/secrets/postgres.env"]
+    environment:
+      POSTGRES_DB: opsbrain
+      POSTGRES_USER: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    shm_size: 256m
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d opsbrain -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  valkey:
+    <<: *defaults
+    image: valkey/valkey:8.1-alpine
+    user: valkey
+    env_file: ["${OPSBRAIN_ETC}/secrets/valkey.env"]
+    # The password comes from the env file; the shell expands it at start-up.
+    command: ["sh", "-c", "exec valkey-server --requirepass \"$$VALKEY_PASSWORD\" --appendonly yes --dir /data --maxmemory 512mb --maxmemory-policy noeviction --protected-mode yes"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$VALKEY_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  migrate:
+    <<: *app
+    restart: "no"
+    # Only the migration job gets the owner-role credentials.
+    env_file: ["${OPSBRAIN_ETC}/secrets/app.env", "${OPSBRAIN_ETC}/secrets/migrate.env"]
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--beat", "--loglevel=INFO",
+              "--concurrency=2", "--schedule=/tmp/celerybeat-schedule"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    <<: *defaults
+    image: opsbrain/web:${OPSBRAIN_VERSION}
+    build: { context: ../../frontend }
+    read_only: true
+    tmpfs: ["/config:size=8m", "/data:size=8m"]
+    environment:
+      OPSBRAIN_HOSTNAME: ${OPSBRAIN_HOSTNAME}
+      OPSBRAIN_SITE_ADDRESSES: ${OPSBRAIN_SITE_ADDRESSES:?}
+    ports:
+      - "${OPSBRAIN_HTTP_PORT:-80}:80"
+      - "${OPSBRAIN_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - "${OPSBRAIN_ETC}/tls:/etc/opsbrain/tls:ro"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "--no-check-certificate", "https://127.0.0.1/api/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  postgres-data:
+  valkey-data:
+
+networks:
+  opsbrain:
+    name: opsbrain

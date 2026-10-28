@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_PASSWORD: opsbrain-test
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+      valkey:
+        image: valkey/valkey:8.1-alpine
+        ports: ["56379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: backend
+        run: pip install -e ".[dev]"
+      - name: Lint
+        working-directory: backend
+        run: ruff check .
+      - name: Tests (unit + integration)
+        working-directory: backend
+        env:
+          OPSBRAIN_REQUIRE_INTEGRATION: "1"
+          OPSBRAIN_TEST_REDIS_URL: redis://127.0.0.1:56379/15
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -x -P scripts scripts/opsbrainctl scripts/lib/*.sh scripts/dev/*.sh deploy/core/postgres/init/*.sh tests/e2e/*.sh
+      - run: shellcheck -x -P SCRIPTDIR/../.. tests/scripts/*.sh
+      - run: bash tests/scripts/test_opsbrainctl.sh
+
+  e2e:
+    needs: [backend, frontend, shell]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install, smoke-test, back up, restore, upgrade, remove and purge on a fresh runner
+        run: sudo bash tests/e2e/run.sh

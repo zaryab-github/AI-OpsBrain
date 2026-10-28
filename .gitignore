@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+
+# Local runtime state and secrets — never commit
+.env
+*.env
+!deploy/**/*.env.example
+/.local/
+/tests/e2e/.work/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
