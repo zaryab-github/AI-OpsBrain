@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew the AI-OpsBrain server certificate when it nears expiry
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@OPSBRAINCTL@ cert renew --if-expiring 30

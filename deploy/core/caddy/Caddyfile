@@ -1,0 +1,56 @@
+{
+	# The admin endpoint stays on the container's loopback only; used for config reloads.
+	admin localhost:2019
+	# Certificates always come from opsbrainctl (internal CA or imported); Caddy must not issue its own.
+	# HTTP->HTTPS redirects stay on.
+	auto_https disable_certs
+	skip_install_trust
+	default_sni {$OPSBRAIN_HOSTNAME}
+	servers {
+		protocols h1 h2
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+
+{$OPSBRAIN_SITE_ADDRESSES} {
+	tls /etc/opsbrain/tls/server.crt /etc/opsbrain/tls/server.key {
+		protocols tls1.2 tls1.3
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# Internal-only endpoints are never served to the outside. A `handle` with a longer path than /api/*
+	# is matched first; a bare `respond` would run after the /api/* proxy and never apply.
+	handle /api/metrics* {
+		respond 404
+	}
+
+	# Caddy sets X-Forwarded-For/-Proto itself and ignores client-supplied values (no trusted_proxies configured).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		root * /srv
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@html not path /assets/*
+		header @html Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

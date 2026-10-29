@@ -1,0 +1,10 @@
+[Unit]
+Description=AI-OpsBrain encrypted backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@OPSBRAINCTL@ backup --quiet --tag scheduled
+Nice=10
+IOSchedulingClass=idle
