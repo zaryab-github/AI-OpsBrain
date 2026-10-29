@@ -1,6 +1,0 @@
-# Everything that ships to Linux must keep LF line endings, even when checked out on Windows.
-* text=auto eol=lf
-*.pdf binary
-*.png binary
-*.ico binary
-*.ps1 text eol=crlf
