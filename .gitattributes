@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.pdf binary
+bin/* text eol=lf
+*.sh text eol=lf

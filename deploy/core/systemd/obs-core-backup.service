@@ -1,0 +1,12 @@
+[Unit]
+Description=Observability platform core backup
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@OBSCTL@ core backup --quiet
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes

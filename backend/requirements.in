@@ -1,0 +1,13 @@
+# Runtime dependencies. scripts/lock-deps.sh writes the pinned lock (requirements.txt) from these.
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+alembic
+psycopg[binary]>=3.2
+pydantic[email]>=2
+argon2-cffi
+PyJWT
+pyotp
+cryptography
+prometheus-client
+httpx

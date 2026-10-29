@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Fake docker CLI for obsctl tests. Records every invocation in $FAKE_DOCKER_LOG.
+# Behaviour switches (environment): FAKE_UNHEALTHY=<service>, FAKE_HAS_USERS=0|1,
+# FAKE_FAIL_BUILD=1, FAKE_MISSING=<service>
+printf '%s\n' "$*" >> "${FAKE_DOCKER_LOG:?}"
+case "${1:-}" in
+  info)
+    if [[ "${2:-}" == "-f" ]]; then echo "${TMPDIR:-/tmp}"; fi
+    exit 0 ;;
+  inspect)
+    cid="${*: -1}"
+    svc="${cid#cid-}"
+    if [[ "${FAKE_UNHEALTHY:-}" == "$svc" ]]; then echo "running/unhealthy"; else echo "running/healthy"; fi
+    exit 0 ;;
+  compose)
+    if [[ "${2:-}" == "version" ]]; then echo "Docker Compose version v2.29.0"; exit 0; fi
+    shift 7   # compose --project-name P --env-file E -f F
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      ps)
+        svc="${*: -1}"
+        if [[ "${FAKE_MISSING:-}" == "$svc" ]]; then exit 0; fi
+        echo "cid-${svc}"; exit 0 ;;
+      build)
+        [[ "${FAKE_FAIL_BUILD:-0}" == "1" ]] && exit 1
+        exit 0 ;;
+      exec)
+        # strip -T
+        [[ "${1:-}" == "-T" ]] && shift
+        svc="${1:-}"; shift || true
+        case "$svc $*" in
+          "postgres pg_dump"*) echo "PGDUMP-CONTENT-$(date +%s%N)"; exit 0 ;;
+          "postgres psql"*alembic_version*) echo "0001"; exit 0 ;;
+          "postgres pg_restore"*) cat > "${FAKE_DOCKER_LOG}.pg_restore_stdin"; exit 0 ;;
+          "proxy tar"*) tar -cf - -C "$(dirname "$FAKE_DOCKER_LOG")" docker.log; exit 0 ;;
+          "api python -m app.cli has-users"*) [[ "${FAKE_HAS_USERS:-1}" == "1" ]]; exit $? ;;
+          "api python -m app.cli create-admin"*) cat > /dev/null; echo "admin created"; exit 0 ;;
+          "api python -m app.cli reset-password"*) cat > /dev/null; exit 0 ;;
+          "api python -m app.cli selfmon-report"*) cat > "${FAKE_DOCKER_LOG}.selfmon"; exit 0 ;;
+          *) cat > /dev/null 2>&1 || true; exit 0 ;;
+        esac ;;
+      run)
+        # consume stdin when used as `run ... sh -c 'tar -xf -' < file`
+        if [[ ! -t 0 ]]; then cat > /dev/null || true; fi
+        exit 0 ;;
+      cp)
+        # dc cp proxy:/data/... DEST
+        dest="${*: -1}"
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out "$dest" -subj "/CN=Fake Test Root" -days 1 2>/dev/null
+        exit 0 ;;
+      *) exit 0 ;;
+    esac ;;
+  *) exit 0 ;;
+esac

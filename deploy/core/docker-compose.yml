@@ -1,0 +1,179 @@
+# Core module: web UI + API + worker + PostgreSQL + TLS proxy.
+# Managed by `obsctl core ...`. Do not run `docker compose` against this file by hand
+# unless you know the variables in /etc/obs/core.env (obsctl passes them with --env-file).
+name: obs-core
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-env: &backend-env
+  OBS_DB_HOST: postgres
+  OBS_DB_PORT: "5432"
+  OBS_DB_NAME: obs
+  OBS_DB_USER: obs
+  OBS_DB_PASSWORD_FILE: /run/secrets/core_db_password
+  OBS_JWT_SECRET_FILE: /run/secrets/core_jwt_secret
+  OBS_FIELD_KEY_FILE: /run/secrets/core_field_key
+  OBS_AUDIT_HMAC_KEY_FILE: /run/secrets/core_audit_hmac_key
+  OBS_METRICS_TOKEN_FILE: /run/secrets/core_metrics_token
+  OBS_HOSTNAME: ${OBS_HOSTNAME}
+  OBS_VERSION: ${OBS_VERSION}
+  OBS_ENV: production
+
+x-backend-base: &backend-base
+  image: obs/backend:${OBS_VERSION}
+  build:
+    context: ../../backend
+    args:
+      OBS_VERSION: ${OBS_VERSION}
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  environment: *backend-env
+  secrets:
+    - core_db_password
+    - core_jwt_secret
+    - core_field_key
+    - core_audit_hmac_key
+    - core_metrics_token
+  logging: *default-logging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: obs
+      POSTGRES_USER: obs
+      POSTGRES_PASSWORD_FILE: /run/secrets/core_db_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --data-checksums"
+    secrets:
+      - core_db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obs -d obs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE]
+    shm_size: 256m
+    logging: *default-logging
+
+  migrate:
+    <<: *backend-base
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend-base
+    command:
+      - uvicorn
+      - app.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+      - --no-server-header
+    networks: [backend, egress]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *backend-base
+    command: ["python", "-m", "app.worker"]
+    networks: [backend, egress]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  proxy:
+    image: obs/proxy:${OBS_VERSION}
+    build:
+      context: ../../frontend
+      args:
+        OBS_VERSION: ${OBS_VERSION}
+    restart: unless-stopped
+    ports:
+      - "${OBS_HTTP_PORT:-80}:80"
+      - "${OBS_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${OBS_CORE_CONF_DIR}/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${OBS_CORE_CONF_DIR}/certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend, edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+secrets:
+  core_db_password:
+    file: ${OBS_SECRETS_DIR}/core_db_password
+  core_jwt_secret:
+    file: ${OBS_SECRETS_DIR}/core_jwt_secret
+  core_field_key:
+    file: ${OBS_SECRETS_DIR}/core_field_key
+  core_audit_hmac_key:
+    file: ${OBS_SECRETS_DIR}/core_audit_hmac_key
+  core_metrics_token:
+    file: ${OBS_SECRETS_DIR}/core_metrics_token
+
+volumes:
+  pgdata:
+    name: obs-core-pgdata
+  caddy_data:
+    name: obs-core-caddy-data
+  caddy_config:
+    name: obs-core-caddy-config
+
+networks:
+  # Internal-only network shared with future modules (logging, monitoring, automation).
+  backend:
+    name: obs-backend
+    internal: true
+  # Outbound access for the API/worker (SMTP, LLM providers, heartbeat URL).
+  egress:
+    name: obs-egress
+  # Published ports live on the proxy only.
+  edge:
+    name: obs-edge

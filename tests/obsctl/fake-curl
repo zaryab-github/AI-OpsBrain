@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake curl: the watchdog health probe always answers 200.
+printf '200'

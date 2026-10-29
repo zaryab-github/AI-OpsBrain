@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 246 247 249;
+  --surface: 255 255 255;
+  --subtle: 240 242 245;
+  --line: 223 227 233;
+  --ink: 22 27 34;
+  --muted: 101 109 118;
+  --brand: 31 111 235;
+  --brand-ink: 255 255 255;
+  --ok: 26 127 55;
+  --warn: 154 103 0;
+  --crit: 207 34 46;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 13 17 23;
+    --surface: 22 27 34;
+    --subtle: 33 38 45;
+    --line: 48 54 61;
+    --ink: 230 237 243;
+    --muted: 139 148 158;
+    --brand: 88 166 255;
+    --brand-ink: 13 17 23;
+    --ok: 63 185 80;
+    --warn: 210 153 34;
+    --crit: 248 81 73;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: 13 17 23;
+  --surface: 22 27 34;
+  --subtle: 33 38 45;
+  --line: 48 54 61;
+  --ink: 230 237 243;
+  --muted: 139 148 158;
+  --brand: 88 166 255;
+  --brand-ink: 13 17 23;
+  --ok: 63 185 80;
+  --warn: 210 153 34;
+  --crit: 248 81 73;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-bg text-ink font-sans antialiased; }
+:focus-visible { outline: 2px solid rgb(var(--brand)); outline-offset: 2px; }

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
+# Local runtime / secrets (never commit)
+*.env
+!*.env.example
+secrets/
+*.pem
+*.key
+*.dump
+*.gpg
+*.tar.gz
+/backups/
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

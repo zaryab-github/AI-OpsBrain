@@ -1,0 +1,11 @@
+[Unit]
+Description=Observability platform core watchdog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@OBSCTL@ core watchdog --quiet
+# A non-zero exit (1 = warning, 2 = critical) marks the unit failed: see `systemctl --failed`
+NoNewPrivileges=yes
+PrivateTmp=yes
